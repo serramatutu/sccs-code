@@ -24,6 +24,8 @@ def get_read_ratios(experiments, name: str) -> Tuple[int, int]:
             if transaction["read_value"]["reference"] == transaction["read_value"][name]:
                 correct_reads += 1
             else:
+                # if name == "deferred":
+                #     print(transaction)
                 wrong_reads += 1
 
     total_reads = correct_reads + wrong_reads

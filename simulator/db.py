@@ -121,8 +121,15 @@ class EagerPartition(BasePartition):
 
 class DeferredPartition(BasePartition):
     """Partition implementation that defers transactions."""
-    def __init__(self, id: int) -> None:
+    def __init__(self, 
+        id: int, 
+        max_defer_time: float = -1,
+    ) -> None:
         super().__init__(id)
+
+        self.max_defer_time = max_defer_time
+
+        self._deferred_at: Dict[Transaction, Set[Transaction]] = {}
 
         self._depended_by: Dict[Transaction, Set[Transaction]] = defaultdict(set)
         self._depends_on: Dict[Transaction, Set[Transaction]] = defaultdict(set)
@@ -150,6 +157,8 @@ class DeferredPartition(BasePartition):
         if len(depends_on) == 0:
             return False
 
+        self._deferred_at[transaction] = self._current_time
+
         depends_on_text = ", ".join(str(other.id) for other in depends_on)
         self._logger.debug(f"deferring {transaction.id} because it depends on {depends_on_text}")
         self._depends_on[transaction] = depends_on
@@ -169,6 +178,19 @@ class DeferredPartition(BasePartition):
         # check if deferred transactions can now run
         started: Set[Transaction] = set()
         for transaction, dependencies in self._depends_on.items():
+            # whether to trigger transaction eagerly even though it still has dependencies to avoid latency
+            trigger_eager = (
+                self.max_defer_time > 0
+                and self._current_time - self._deferred_at[transaction] > self.max_defer_time
+            )
+
+            # remove dependencies from future transactions since we're executing this eagerly
+            if trigger_eager:
+                for depended_by in self._depended_by[transaction]:
+                    self._depends_on[depended_by].remove(transaction)
+
+                del self._depended_by[transaction]
+
             if len(dependencies) == 0:
                 started.add(transaction)
                 self._transaction_start(transaction)

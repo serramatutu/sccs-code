@@ -39,7 +39,7 @@ def create_workload(
         
         for i in range(second_transactions):
             submit_time = submit_times[i]
-            execution_time = rng.normal(execution_average, execution_deviation)
+            execution_time = max(0, rng.normal(execution_average, execution_deviation))
             chance = rng.random()
 
             if chance < get_percentage:

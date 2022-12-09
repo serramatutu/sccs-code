@@ -24,6 +24,7 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--duration", required=True, type=float)
     parser.add_argument("--tps", required=True, type=float)
     parser.add_argument("--execution-time-avg", required=True, type=float)
+    parser.add_argument("--max-defer-time", required=False, type=float, default=-1)
 
     return parser.parse_args(args)
 
@@ -75,6 +76,7 @@ def run_on_partitions(duration: float, workload: List[Transaction], partitions: 
 def run(
     num_partitions: int,
     duration: float,
+    max_defer_time: float,
     **kwargs
 ):
     workload = create_workload(
@@ -90,7 +92,7 @@ def run(
     ]
 
     deferred: List[BasePartition] = [
-        DeferredPartition(id=i) for i in range(num_partitions)
+        DeferredPartition(id=i, max_defer_time=max_defer_time) for i in range(num_partitions)
     ]
 
     reference_reads, _ = run_on_partitions(duration, workload, reference)
@@ -106,6 +108,7 @@ def main(args_list: List[str]):
 
     for _ in range(args.num_experiments):
         workload, reference_reads, eager_reads, deferred_reads, eager_lat, deferred_lat = run(
+            max_defer_time=args.max_defer_time,
             num_partitions=args.num_partitions,
             tps_average=args.tps, 
             keyspace_size=args.keyspace_size, 
