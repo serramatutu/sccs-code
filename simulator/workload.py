@@ -9,8 +9,9 @@ from simulator.types import Transaction, TransactionType
 def create_workload(
     seed: Optional[int] = None,
     duration: int = 20,
-    overwrite_percentage: float = 1/2,
-    increase_percentage: float = 1/2,
+    get_percentage: float = 1/3,
+    overwrite_percentage: float = 1/3,
+    increase_percentage: float = 1/3,
     tps_average: float = 10.0,
     tps_deviation: float = 1.0,
     execution_average: float = 1.0,
@@ -19,7 +20,7 @@ def create_workload(
 ) -> List[Transaction]:
     """Generate a transaction workload."""
 
-    if not math.isclose(overwrite_percentage + increase_percentage, 1.0):
+    if not math.isclose(get_percentage + overwrite_percentage + increase_percentage, 1.0):
         raise ValueError("Sum of percentages must equal 1.")
 
     rng = np.random.default_rng(seed)
@@ -41,7 +42,9 @@ def create_workload(
             execution_time = rng.normal(execution_average, execution_deviation)
             chance = rng.random()
 
-            if chance < overwrite_percentage:
+            if chance < get_percentage:
+                transaction_type = TransactionType.GET
+            elif chance < get_percentage + overwrite_percentage:
                 transaction_type = TransactionType.OVERWRITE
             else:
                 transaction_type = TransactionType.INCREASE

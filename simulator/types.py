@@ -3,6 +3,7 @@ from enum import Enum
 
 
 class TransactionType(str, Enum):
+    GET = "GET"
     OVERWRITE = "OVERWRITE"
     INCREASE = "INCREASE"
 

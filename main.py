@@ -1,26 +1,37 @@
+import argparse
 from collections import deque
 import json
 import logging
 from typing import List, Dict, Tuple, Deque, Set
+import sys
 
 from simulator.workload import create_workload
-from simulator.types import Transaction
+from simulator.types import Transaction, TransactionType
 from simulator.db import BasePartition, EagerPartition, DeferredPartition, ReferencePartition
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger("main")
 
 TIME_STEP = 0.001
 
-DURATION = 30
-EXECUTION_TIME = 1
+def parse_args(args: List[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-o", "--out-file", required=True, type=str)
+    parser.add_argument("--num-experiments", required=False, type=int, default=1)
+    parser.add_argument("--num-partitions", required=True, type=int)
+    parser.add_argument("--keyspace-size", required=True, type=int)
+    parser.add_argument("--duration", required=True, type=float)
+    parser.add_argument("--tps", required=True, type=float)
+    parser.add_argument("--execution-time-avg", required=True, type=float)
 
-def run_on_partitions(workload: List[Transaction], partitions: List[BasePartition]) -> Tuple[Dict[int, int], Dict[Transaction, float]]:
+    return parser.parse_args(args)
+
+def run_on_partitions(duration: float, workload: List[Transaction], partitions: List[BasePartition]) -> Tuple[Dict[int, int], Dict[Transaction, float]]:
     transaction_queue: Deque[Transaction] = deque(workload)
 
     time = 0
-    while time < DURATION:
+    while time < duration:
         for p in partitions:
             p.clock(time)
 
@@ -50,28 +61,24 @@ def run_on_partitions(workload: List[Transaction], partitions: List[BasePartitio
         logger.debug(f"partition 0 -> {len(p._pending)} pending, {len(p._started)} started, {len(p._finished_at)} finished")
     logger.debug("-------------------------")
 
-    # TODO: pythonize
-    keys: Dict[int, int] = {}
+    read_values: Dict[Transaction, int] = {}
     latencies: Dict[Transaction, float] = {}
     for p in partitions:
         for transaction, latency in p.get_latencies().items():
             latencies[transaction] = latency
 
-        for key, value in p.keys.items():
-            keys[key] = value
+        for transaction, read_value in p.get_read_values().items():
+            read_values[transaction] = read_value
 
-    return keys, latencies
+    return read_values, latencies
 
-def run():
-    num_partitions = 10
-    keyspace_size = 20
-    tps_average = 10
-
+def run(
+    num_partitions: int,
+    duration: float,
+    **kwargs
+):
     workload = create_workload(
-        tps_average=tps_average, 
-        keyspace_size=keyspace_size, 
-        duration=DURATION, 
-        execution_average=EXECUTION_TIME
+        **kwargs
     )
 
     reference: List[BasePartition] = [
@@ -86,47 +93,62 @@ def run():
         DeferredPartition(id=i) for i in range(num_partitions)
     ]
 
-    reference_keys, _ = run_on_partitions(workload, reference)
-    eager_keys, eager_latencies = run_on_partitions(workload, eager)
-    deferred_keys, deferred_latencies = run_on_partitions(workload, deferred)
+    reference_reads, _ = run_on_partitions(duration, workload, reference)
+    eager_reads, eager_latencies = run_on_partitions(duration, workload, eager)
+    deferred_reads, deferred_latencies = run_on_partitions(duration, workload, deferred)
 
-    return workload, reference_keys, eager_keys, deferred_keys, eager_latencies, deferred_latencies
+    return workload, reference_reads, eager_reads, deferred_reads, eager_latencies, deferred_latencies
 
-def main():
-    experiments = 1
+def main(args_list: List[str]):
+    args = parse_args(args_list)
+
     results = []
-    for _ in range(experiments):
-        workload, reference_keys, eager_keys, deferred_keys, eager_lat, deferred_lat = run()
 
-        experiment_results = {
-            "workload": [
-                {
-                    "id": t.id,
-                    "type": t.type.name,
-                    "key": t.key,
-                    "submit_time": t.submit_time,
-                    "execution_time": t.execution_time,
-                    "latency": {
-                        "eager": eager_lat[t],
-                        "deferred": deferred_lat[t]
-                    }
+    for _ in range(args.num_experiments):
+        workload, reference_reads, eager_reads, deferred_reads, eager_lat, deferred_lat = run(
+            num_partitions=args.num_partitions,
+            tps_average=args.tps, 
+            keyspace_size=args.keyspace_size, 
+            duration=args.duration, 
+            execution_average=args.execution_time_avg,
+        )
+
+        experiment_results = [
+            {
+                "id": t.id,
+                "type": t.type.name,
+                "key": t.key,
+                "submit_time": t.submit_time,
+                "execution_time": t.execution_time,
+                "read_value": {
+                    "reference": reference_reads.get(t),
+                    "eager": eager_reads.get(t),
+                    "deferred": deferred_reads.get(t)
+                },
+                "latency": {
+                    "eager": eager_lat[t],
+                    "deferred": deferred_lat[t]
                 }
-                for t in workload
-            ],
-            "keys": {
-                ref_key: {
-                    "reference": ref_value,
-                    "eager": eager_keys[ref_key],
-                    "deferred": deferred_keys[ref_key]
-                }
-                for ref_key, ref_value in reference_keys.items()
             }
-        }
+            for t in workload
+        ]
         results.append(experiment_results)
 
-    with open("results.json", "w") as f:
-        f.write(json.dumps(results, indent=4))
+    experiment = {
+        "parameters": {
+            "num_partitions": args.num_partitions,
+            "keyspace_size": args.keyspace_size,
+            "tps_average": args.tps,
+            "duration": args.duration,
+            "execution_time_average": args.execution_time_avg,
+            "time_resolution": TIME_STEP
+        },
+        "results": results,
+    }
+
+    with open(args.out_file, "w") as f:
+        f.write(json.dumps(experiment, indent=4))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

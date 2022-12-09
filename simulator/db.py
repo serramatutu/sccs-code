@@ -25,6 +25,9 @@ class BasePartition(ABC):
         # track the state of keys when transactions were created
         self._keystate: Dict[Transaction, int] = {}
 
+        # track the values that GET transactions read
+        self._read_values: Dict[Transaction, int] = {}
+
         self._logger = logger.getChild(str(id))
 
     def _transaction_start(self, transaction: Transaction) -> None:
@@ -38,6 +41,10 @@ class BasePartition(ABC):
     def _transaction_finish(self, transaction: Transaction) -> None:
         self._started.remove(transaction)
         self._finished_at[transaction] = self._current_time
+
+        if transaction.type == TransactionType.GET:
+            self._keystate[transaction] = self.keys[transaction.key]
+            return
 
         if transaction.type == TransactionType.OVERWRITE:
             self.keys[transaction.key] = 0
@@ -56,6 +63,17 @@ class BasePartition(ABC):
 
     def get_latency_for_transaction(self, transaction: Transaction) -> None:
         return self._finished_at[transaction] - transaction.submit_time
+
+    def get_read_value_for_transaction(self, transaction: Transaction) -> int:
+        assert transaction in self._finished_at
+        return self._keystate[transaction]
+
+    def get_read_values(self) -> Dict[Transaction, int]:
+        values = {}
+        for transaction in self._finished_at:
+            if transaction.type == TransactionType.GET:
+                values[transaction] = self.get_read_value_for_transaction(transaction)
+        return values
 
     def get_latencies(self) -> Dict[Transaction, float]:
         return {
