@@ -139,14 +139,17 @@ class DeferredPartition(BasePartition):
             other for other in self._pending
             if other.key == transaction.key
             and self._submitted_at[other] < self._submitted_at[transaction]
+            and other.type != TransactionType.GET
         )
         depends_on_deferred = set(
             other for other in self._depends_on
             if other.key == transaction.key
+            and other.type != TransactionType.GET
         )
         depends_on_started = set(
             other for other in self._started 
             if other.key == transaction.key
+            and other.type != TransactionType.GET
         )
         depends_on = (
             depends_on_pending

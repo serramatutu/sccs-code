@@ -28,8 +28,10 @@ def parse_args(args: List[str]) -> argparse.Namespace:
 
     return parser.parse_args(args)
 
-def run_on_partitions(duration: float, workload: List[Transaction], partitions: List[BasePartition]) -> Tuple[Dict[int, int], Dict[Transaction, float]]:
+def run_on_partitions(duration: float, keyspace_size: int, workload: List[Transaction], partitions: List[BasePartition]) -> Tuple[Dict[int, int], Dict[Transaction, float]]:
     transaction_queue: Deque[Transaction] = deque(workload)
+
+    partition_keyspace_size = keyspace_size // len(partitions)
 
     time = 0
     while time < duration:
@@ -38,7 +40,7 @@ def run_on_partitions(duration: float, workload: List[Transaction], partitions: 
 
         while len(transaction_queue) > 0 and transaction_queue[0].submit_time <= time:
             transaction = transaction_queue.popleft()
-            partition = partitions[transaction.key // len(partitions)]
+            partition = partitions[transaction.key // partition_keyspace_size]
             partition.submit_transaction(transaction)
 
         time += TIME_STEP
@@ -76,10 +78,12 @@ def run_on_partitions(duration: float, workload: List[Transaction], partitions: 
 def run(
     num_partitions: int,
     duration: float,
+    keyspace_size: int,
     max_defer_time: float,
     **kwargs
 ):
     workload = create_workload(
+        keyspace_size=keyspace_size,
         **kwargs
     )
 
@@ -95,9 +99,9 @@ def run(
         DeferredPartition(id=i, max_defer_time=max_defer_time) for i in range(num_partitions)
     ]
 
-    reference_reads, _ = run_on_partitions(duration, workload, reference)
-    eager_reads, eager_latencies = run_on_partitions(duration, workload, eager)
-    deferred_reads, deferred_latencies = run_on_partitions(duration, workload, deferred)
+    reference_reads, _ = run_on_partitions(duration, keyspace_size, workload, reference)
+    eager_reads, eager_latencies = run_on_partitions(duration, keyspace_size, workload, eager)
+    deferred_reads, deferred_latencies = run_on_partitions(duration, keyspace_size, workload, deferred)
 
     return workload, reference_reads, eager_reads, deferred_reads, eager_latencies, deferred_latencies
 
